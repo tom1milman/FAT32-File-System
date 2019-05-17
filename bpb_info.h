@@ -8,6 +8,7 @@ typedef struct BPB_Info
     unsigned int BPB_NumFATs;
     unsigned int BPB_FATSz32;
     unsigned int BPB_TotSec32;
+    unsigned int BPB_RootClus;
 
 }BPB_Info;
 
@@ -26,6 +27,8 @@ BPB_Info get_BPB_info (unsigned char * buffer)
     info.BPB_FATSz32 = convert_to_big_endian_4_byte(buffer[36], buffer[37], buffer[38], buffer[39]);
 
     info.BPB_TotSec32 = convert_to_big_endian_4_byte(buffer[32], buffer[33], buffer[34], buffer[35]);
+
+    info.BPB_RootClus = convert_to_big_endian_4_byte(buffer[44], buffer[45], buffer[46], buffer[47]);
 
     return info;
 }
