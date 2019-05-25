@@ -21,7 +21,7 @@ typedef struct DIR_info
     unsigned int DIR_FstClusHI;
     unsigned int FstCluster;
     unsigned int DIR_FileSize;
-    int number_of_files;
+//    int number_of_files;
     DIR_Attr dir_attr;
 
 }DIR_info;
@@ -39,8 +39,10 @@ typedef struct Clusters
 }Clusters;
 
 DIR_info dir_constructor (unsigned char * buffer, unsigned int dir_address, unsigned int parent_DIR_address);
-DIR_files get_dir_files (unsigned char * buffer, DIR_info dir_info);
-DIR_files get_dir_files_from_pointer (unsigned char * buffer, DIR_info * dir_info);
+DIR_files get_dir_files (unsigned char * buffer, DIR_info dir_info, unsigned int SecPerClus, unsigned int BytesPerSec, unsigned int FirstDataSector, unsigned int FAToffset);
+DIR_files get_dir_files_from_pointer (unsigned char * buffer, DIR_info * dir_info, unsigned int SecPerClus, unsigned int BytesPerSec, unsigned int FirstDataSector, unsigned int FAToffset);
 DIR_info * get_file_from (DIR_files files, char * name);
 unsigned int getFirstSectorofClusterN (unsigned int clusterNum, unsigned int SecPerClus, unsigned int FirstDataSector);
 Clusters getAllClusters (unsigned int firstClus, unsigned char * buffer, unsigned int FAToffset);
+
+char volume_name[12];

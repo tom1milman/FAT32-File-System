@@ -33,8 +33,9 @@ unsigned int getFirstDataSector (BPB_Info bpb_info);
 //unsigned int getFirstSectorofClusterN (unsigned int clusterNum, BPB_Info bpb_info, unsigned int FirstDataSector);
 //unsigned int * getAllClusters (unsigned int firstClus, unsigned char * buffer, unsigned int FAToffset);
 int ls_function (DIR_files files);
-unsigned int cd_function (unsigned int firstSector);
 int read_file (int start, int end, unsigned int address, char * buffer);
+int stats_function (DIR_info * file);
+char * change_terminalStr (char * terminalStrOld, char * new_dir);
 
 /* This is the main function of your project, and it will be run
  * first before all other functions.
@@ -71,8 +72,6 @@ int main(int argc, char *argv[])
     unsigned int FirstSectorofCluster2 = getFirstSectorofClusterN(bpb_info.BPB_RootClus, bpb_info.BPB_SecPerClus, FirstDataSector);
     unsigned int root_addr = FirstSectorofCluster2 * bpb_info.BPB_BytesPerSec;
 
-    DIR_info root = dir_constructor(buffer, root_addr, 0);
-
     unsigned int FATSz;
 
     if (bpb_info.BPB_FATSz32 != 0)
@@ -88,11 +87,9 @@ int main(int argc, char *argv[])
        for each command besides quit. */
 
     current_dir_info = dir_constructor(buffer, current_directory, 0);
-    files = get_dir_files(buffer, current_dir_info);
+    files = get_dir_files(buffer, current_dir_info, bpb_info.BPB_SecPerClus, bpb_info.BPB_BytesPerSec, FirstDataSector, FAToffset);
 
     while(True) {
-        printf("current Address 0x%x sec: %u %u\n", current_directory, current_dir_info.DIR_FstClusLo, current_dir_info.FstCluster);
-
         bzero(cmd_line, MAX_CMD);
         printf("%s", terminalStr);
         fgets(cmd_line,MAX_CMD,stdin);
@@ -104,25 +101,23 @@ int main(int argc, char *argv[])
             print_BPB_info(&bpb_info);
         }
 
-        else if(strncmp(cmd_line,"open",4)==0) {
-            printf("Going to open!\n");
-
-            Clusters clusters = getAllClusters(current_dir_info.FstCluster, buffer, FAToffset);
-
-
-            printf("clusters: ");
-            for (int i = 0; i < clusters.num_of_clusters; i++)
-                printf("%x %x, ", clusters.clustersArray[i], getFirstSectorofClusterN(clusters.clustersArray[i], bpb_info.BPB_SecPerClus, FirstDataSector) * bpb_info.BPB_BytesPerSec);
-
-            printf("\n");
-        }
-
-        else if(strncmp(cmd_line,"close",5)==0) {
-            printf("Going to close!\n");
-        }
-
         else if(strncmp(cmd_line,"size",4)==0) {
-            printf("Going to size!\n");
+            if (cmd_tokens.num_of_tokens < 2)
+                printf("Error: not enough args\n");
+
+            DIR_info * size_file = NULL;
+            size_file = get_file_from(files, cmd_tokens.tokens[1]);
+
+            if (size_file == NULL) {
+                printf("Error: does not exist\n");
+                continue;
+            }
+
+            printf("Size: %d\n", size_file->DIR_FileSize);
+        }
+
+        else if(strncmp(cmd_line,"volume",6)==0) {
+            printf("Volume: %s\n", volume_name);
         }
 
         else if(strncmp(cmd_line,"cd",2)==0) {
@@ -136,21 +131,24 @@ int main(int argc, char *argv[])
             if (dir == NULL)
                 printf("Error: does not exist\n");
             else if (dir->dir_attr.ATTR_DIRECTORY) {
-                unsigned int firstSector = getFirstSectorofClusterN(dir->FstCluster, bpb_info.BPB_SecPerClus, getFirstDataSector(bpb_info));
+                unsigned int FstCluster = dir->FstCluster;
+
+                if (FstCluster == 0)
+                    FstCluster = FstCluster + 2;
+
+                unsigned int firstSector = getFirstSectorofClusterN(FstCluster, bpb_info.BPB_SecPerClus, getFirstDataSector(bpb_info));
                 unsigned int dir_address = firstSector * bpb_info.BPB_BytesPerSec;
 
                 current_directory = dir_address;
 
-                printf("%X %X %x %x, %s\n", dir_address,current_directory, dir->DIR_FstClusLo, dir->DIR_FstClusHI, dir->DIR_Name);
-
                 current_dir_info = dir_constructor(buffer, dir_address, 0);
-                files = get_dir_files(buffer, current_dir_info);
+                files = get_dir_files(buffer, current_dir_info, bpb_info.BPB_SecPerClus, bpb_info.BPB_BytesPerSec, FirstDataSector, FAToffset);
+
+                terminalStr = change_terminalStr(terminalStr, dir->DIR_Name);
             }
             else {
                 printf("Error: not a directory\n");
             }
-
-//            unsigned int * allClus = getAllClusters()
         }
 
         else if(strncmp(cmd_line,"ls",2)==0) {
@@ -165,7 +163,7 @@ int main(int argc, char *argv[])
                     printf("Error: directory doesn't exist.\n");
                 else {
                     if (ls_dir->dir_attr.ATTR_DIRECTORY) {
-                        DIR_files subFiles = get_dir_files_from_pointer(buffer, ls_dir);
+                        DIR_files subFiles = get_dir_files_from_pointer(buffer, ls_dir, bpb_info.BPB_SecPerClus, bpb_info.BPB_BytesPerSec, FirstDataSector, FAToffset);
 //                        ls_function(subFiles);
                     } else {
                         printf("Error: not a directory.\n");
@@ -175,8 +173,6 @@ int main(int argc, char *argv[])
         }
 
         else if(strncmp(cmd_line,"read",4)==0) {
-            printf("Going to read!\n");
-
             if (cmd_tokens.num_of_tokens < 4) {
                 printf("Error: not enough args\n");
                 continue;
@@ -184,21 +180,59 @@ int main(int argc, char *argv[])
 
             DIR_info * file = get_file_from(files, cmd_tokens.tokens[1]);
 
+            if (file == NULL) {
+                printf("Error: file doesn't exist.\n");
+                continue;
+            }
+
             int start = atoi(cmd_tokens.tokens[2]);
             int end = atoi(cmd_tokens.tokens[3]);
 
-            int i = start;
-            unsigned int add = bpb_info.BPB_BytesPerSec * getFirstSectorofClusterN(file->DIR_FstClusLo, bpb_info.BPB_SecPerClus, getFirstDataSector(bpb_info));
+            if (start >= end) {
+                printf("Error: start byte can't be greater than end byte.");
+                continue;
+            }
 
-            read_file(start, end, add, buffer);
+            unsigned int add = bpb_info.BPB_BytesPerSec * getFirstSectorofClusterN(file->DIR_FstClusLo, bpb_info.BPB_SecPerClus, getFirstDataSector(bpb_info));
 
             Clusters clusters = getAllClusters(file->FstCluster, buffer, FAToffset);
 
+            int bytes_per_cluster = bpb_info.BPB_SecPerClus * bpb_info.BPB_BytesPerSec;
 
-            printf("\nclusters: ");
-            for (int i = 0; i < clusters.num_of_clusters; i++)
-                printf("%u %x, ", clusters.clustersArray[i], getFirstSectorofClusterN(clusters.clustersArray[i], bpb_info.BPB_SecPerClus, FirstDataSector) * bpb_info.BPB_BytesPerSec);
+            int start_read_cluster = start / bytes_per_cluster;
+            unsigned int start_read_byte = start % bytes_per_cluster;
+            int end_read_cluster = end / bytes_per_cluster;
+            unsigned int end_read_byte = end % bytes_per_cluster;
 
+            if (start_read_cluster > clusters.num_of_clusters) {
+                continue;
+            }
+
+            for (int i = start_read_cluster; i <= end_read_cluster; i++) {
+                unsigned int cluster_address = bpb_info.BPB_BytesPerSec * getFirstSectorofClusterN(clusters.clustersArray[i], bpb_info.BPB_SecPerClus, getFirstDataSector(bpb_info));
+
+                unsigned int index;
+                unsigned int index_end;
+
+                if (i == start_read_cluster)
+                    index = start_read_byte;
+                else
+                    index = 0;
+
+                if (i == end_read_cluster)
+                    index_end = end_read_byte;
+                else
+                    index_end = bytes_per_cluster;
+
+
+                while (index < index_end) {
+                    if (buffer[cluster_address + index] == 0x0A && buffer[cluster_address + index + 1] == 0x00)
+                        break;
+
+                    printf("%c", buffer[cluster_address + index]);
+                    index++;
+                }
+            }
 
             printf("\n");
         }
@@ -212,9 +246,10 @@ int main(int argc, char *argv[])
             }
 
             if (file != NULL) {
+//                if (file->dir_attr.ATTR_DIRECTORY)
+//                TODO stats
+                stats_function(file);
 
-                printf("Size is %d\n", file->DIR_FileSize);
-                printf("Next cluster is 0x%x%x\n", file->DIR_FstClusHI, file->DIR_FstClusLo);
             }
             else
                 printf("Error: file/directory does not exist\n");
@@ -299,28 +334,8 @@ unsigned int getFirstDataSector (BPB_Info bpb_info) {
     return FirstDataSector;
 }
 
-//unsigned int getFirstSectorofClusterN (unsigned int clusterNum, BPB_Info bpb_info, unsigned int FirstDataSector)
-//{
-//    unsigned int FirstSectorofCluster = ((clusterNum - 2) * bpb_info.BPB_SecPerClus) + FirstDataSector;
-//
-//    return FirstSectorofCluster;
-//}
-//
-//unsigned int * getAllClusters (unsigned int firstClus, unsigned char * buffer, unsigned int FAToffset)
-//{
-//
-//}
-
-unsigned int cd_function (unsigned int firstSector)
-{
-
-    return 0;
-}
-
 int ls_function (DIR_files files)
 {
-
-    printf("ls: ");
     for (int i = 0; i < files.number_of_files; i++) {
         printf("'%s'   ", files.files[i].DIR_Name);
     }
@@ -342,3 +357,67 @@ int read_file (int start, int end, unsigned int address, char * buffer)
     return 0;
 }
 
+int stats_function (DIR_info * file)
+{
+
+    if (file->dir_attr.ATTR_DIRECTORY) {
+        printf("Size is 0\n");
+        printf("Dir name: %s\n", file->DIR_Name);
+        printf("Next cluster is 0x%x\n", file->FstCluster);
+    }
+    else {
+        printf("Size is %d\n", file->DIR_FileSize);
+        printf("Read only: %u \nHidden: %u \nattr_system: %u \nattr_archive: %u \n", file->dir_attr.ATTR_READ_ONLY, file->dir_attr.ATTR_HIDDEN, file->dir_attr.ATTR_SYSTEM, file->dir_attr.ATTR_ARCHIVE);
+        printf("Next cluster is 0x%x\n", file->FstCluster);
+    }
+    return 0;
+}
+
+
+char * change_terminalStr (char * terminalStrOld, char * new_dir)
+{
+    if (new_dir[0] == '.' && new_dir[1] == 0x0A)
+        return terminalStrOld;
+
+    token_obj terminal_tokens = getTokens(terminalStrOld);
+
+    int isDotDot = 0;
+    int endToken = terminal_tokens.num_of_tokens - 1;
+
+    if (new_dir[0] == '.' && new_dir[1] == '.') {
+        isDotDot = 1;
+        endToken--;
+    }
+
+    char * newTerminal = malloc(32 * sizeof(char));
+    int strChars = 0;
+
+    newTerminal[strChars] = '/';
+    strChars++;
+
+    for (int i = 0; i < endToken; i++) {
+        for (int j = 0; terminal_tokens.tokens[i][j] != '\0'; j++) {
+            newTerminal[strChars] = terminal_tokens.tokens[i][j];
+            strChars++;
+        }
+
+        newTerminal[strChars] = '/';
+        strChars++;
+    }
+
+    if (!isDotDot) {
+        for (int i = 0 ; new_dir[i] != '\0'; i++) {
+            newTerminal[strChars] = new_dir[i];
+            strChars++;
+        }
+
+        newTerminal[strChars] = '/';
+        strChars++;
+    }
+
+    newTerminal[strChars] = ']';
+    strChars++;
+    newTerminal[strChars] = '\0';
+
+    return newTerminal;
+}

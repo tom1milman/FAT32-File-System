@@ -6,6 +6,8 @@
 DIR_Attr get_DIR_Attr (unsigned char attrs);
 char * rename_file (char * old_name, unsigned short isDir, unsigned short isVolId);
 
+//char * volume_name;
+
 DIR_info dir_constructor (unsigned char * buffer, unsigned int dir_address, unsigned int parent_DIR_address)
 {
     DIR_info dir_info;
@@ -24,6 +26,10 @@ DIR_info dir_constructor (unsigned char * buffer, unsigned int dir_address, unsi
     char * new_name = rename_file(dir_info.DIR_Name, dir_info.dir_attr.ATTR_DIRECTORY, dir_info.dir_attr.ATTR_VOLUME_ID);
     strcpy(new_name, dir_info.DIR_Name);
 
+    if (dir_info.dir_attr.ATTR_VOLUME_ID) {
+        strcpy(volume_name, dir_info.DIR_Name);
+    }
+
 //    dir_info.DIR_CrtTime = convert_to_big_endian_2_byte(buffer[dir_address+14], buffer[dir_address+15]);
 
 //    dir_info.DIR_CrtDate = convert_to_big_endian_2_byte(buffer[dir_address+16], buffer[dir_address+17]);
@@ -38,64 +44,73 @@ DIR_info dir_constructor (unsigned char * buffer, unsigned int dir_address, unsi
 
     dir_info.FstCluster = convert_to_big_endian_4_byte(buffer[dir_address+26], buffer[dir_address+27], buffer[dir_address+20], buffer[dir_address+21]);
 
-    printf("cluster: %x\n", dir_info.FstCluster);
+//    printf("cluster: %x\n", dir_info.FstCluster);
 
     return dir_info;
 }
 
-DIR_files get_files (unsigned char * buffer, unsigned int DIR_address, int number_of_files, short ATTR_VOLUME_ID)
+DIR_files get_files (unsigned char * buffer, unsigned int FirstCluster, short ATTR_VOLUME_ID, unsigned int SecPerClus, unsigned int BytesPerSec, unsigned int FirstDataSector, unsigned int FAToffset)
 {
-    DIR_info * files = (DIR_info *) malloc(number_of_files * sizeof(DIR_info));
+    int mallocSize = 16;
+    DIR_info * files = (DIR_info *) malloc(mallocSize * sizeof(DIR_info));
 
-    int file_index = DIR_address;
+    unsigned int file_index = 0, DIR_address = 0;
 
-    if (ATTR_VOLUME_ID)
+    if (ATTR_VOLUME_ID) {
         file_index = file_index + 32;
+    }
 
     int num_of_files = 0;
 
-    int test = 0;
+    Clusters clusters = getAllClusters(FirstCluster, buffer, FAToffset);
 
-    while (1) {
-        test++;
-        printf("%d: %x\n", test, file_index);
-        if (buffer[file_index] == 0xE5) {
+    for (int i = 0; i < clusters.num_of_clusters; i++) {
+        DIR_address = getFirstSectorofClusterN(clusters.clustersArray[i], SecPerClus, FirstDataSector) * BytesPerSec;
+        file_index = DIR_address;
+
+        while ((file_index - DIR_address) < 512) {
+            if (buffer[file_index] == 0xE5) {
+                file_index = file_index + 32;
+                continue;
+            }
+
+            if (buffer[file_index] == 0x00) {
+                break;
+            }
+
+            if (buffer[file_index + 11] == 0x0F) {
+                file_index = file_index + 32;
+                continue;
+            }
+
+            if (num_of_files >= mallocSize) {
+                mallocSize = mallocSize * 2;
+
+                files = (DIR_info *) realloc(files, mallocSize * sizeof(DIR_info));
+            }
+
+            files[num_of_files] = dir_constructor(buffer, file_index, DIR_address);
+
             file_index = file_index + 32;
-            continue;
+            num_of_files++;
         }
-
-        if (buffer[file_index] == 0x00) {
-            break;
-        }
-
-        if (buffer[file_index + 11] == 0x0F) {
-            file_index = file_index + 32;
-            continue;
-        }
-
-        files[num_of_files] = dir_constructor(buffer, file_index, DIR_address);
-
-        file_index = file_index + 32;
-        num_of_files++;
     }
 
     DIR_files dir_files;
     dir_files.files = files;
     dir_files.number_of_files = num_of_files;
 
-    printf("have %d stuff\n", test);
-
     return dir_files;
 }
 
-DIR_files get_dir_files (unsigned char * buffer, DIR_info dir_info)
+DIR_files get_dir_files (unsigned char * buffer, DIR_info dir_info, unsigned int SecPerClus, unsigned int BytesPerSec, unsigned int FirstDataSector, unsigned int FAToffset)
 {
-    return get_files(buffer, dir_info.DIR_address, dir_info.number_of_files, dir_info.dir_attr.ATTR_VOLUME_ID);
+    return get_files(buffer, dir_info.FstCluster, dir_info.dir_attr.ATTR_VOLUME_ID, SecPerClus, BytesPerSec, FirstDataSector, FAToffset);
 }
 
-DIR_files get_dir_files_from_pointer (unsigned char * buffer, DIR_info * dir_info)
+DIR_files get_dir_files_from_pointer (unsigned char * buffer, DIR_info * dir_info, unsigned int SecPerClus, unsigned int BytesPerSec, unsigned int FirstDataSector, unsigned int FAToffset)
 {
-    return get_files(buffer, dir_info->DIR_address, dir_info->number_of_files, dir_info->dir_attr.ATTR_VOLUME_ID);
+    return get_files(buffer, dir_info->FstCluster, dir_info->dir_attr.ATTR_VOLUME_ID, SecPerClus, BytesPerSec, FirstDataSector, FAToffset);
 }
 
 char * rename_file (char * old_name, unsigned short isDir, unsigned short isVolId)
@@ -126,6 +141,10 @@ char * rename_file (char * old_name, unsigned short isDir, unsigned short isVolI
     }
 
     new_name[i_new] = '\0';
+
+    for (int i = i_new; i < 12; i++) {
+        new_name[i] = '\0';
+    }
 
     return new_name;
 }
@@ -165,7 +184,11 @@ Clusters getAllClusters (unsigned int firstClus, unsigned char * buffer, unsigne
     unsigned int * allClusters = malloc (8 * sizeof(unsigned int));
     int i = 0, mallocSize = 8;
 
-    unsigned int cluster = firstClus + 2;
+    unsigned int cluster = firstClus;
+
+    if (firstClus == 0)
+        cluster = cluster + 2;
+
     unsigned int offset = 0;
 
     allClusters[i] = cluster;
@@ -176,14 +199,10 @@ Clusters getAllClusters (unsigned int firstClus, unsigned char * buffer, unsigne
 
         unsigned int j = offset + FAToffset;
 
-        printf("%x %.2x\n", j, buffer[j]);
-
         cluster = convert_to_big_endian_4_byte(buffer[j], buffer[j+1], buffer[j+2], buffer[j+3]) & 0X0fffffff;
 
         if (cluster == 0xffffff8 || cluster == 0xfffffff)
             break;
-
-        printf("cluster %x\n", cluster);
 
         allClusters[i] = cluster;
 
