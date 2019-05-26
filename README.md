@@ -18,6 +18,7 @@ Make sure all the files and the *makefile* are in the working directory. From th
 ###### How to run it?
 After compiling and without changing the working directory, type:
 > ./fat32_reader {disk image path}
+
 Better to use relative path. For example: 
 > ./fat32_reader fat32.img
 
