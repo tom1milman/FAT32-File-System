@@ -1,5 +1,6 @@
 # FAT32-File-System
 Operating Systems FAT 32 file system project
+
 By **Tom Milman**
 
 ## Files in the Submission
@@ -20,12 +21,14 @@ After compiling and without changing the working directory, type:
 > ./fat32_reader {disk image path}
 
 Better to use relative path. For example: 
-> ./fat32_reader fat32.img
+> ./fat32_reader fat32.img/fat32.img
 
 ## Challenges
 There were *many* challenges while doing this project. Most of them were because of c. 
+
 Other challenges were understanding the FAT32 specs, especially how to work with the clusters, and the FAT table.
 
 ## Outside Sources
 Stackoverflow for issues with c.
+
 The *Wikipedia* page about the *Design of the FAT file system*
